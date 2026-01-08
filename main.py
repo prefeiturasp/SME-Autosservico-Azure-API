@@ -8,8 +8,11 @@ from routers import backlog, projects
 
 # Configuração inicial
 load_dotenv()
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+logger = logging.getLogger("app")
 
 # Instância global das configurações
 settings = Settings()

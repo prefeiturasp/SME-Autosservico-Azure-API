@@ -1,7 +1,7 @@
-import asyncio
 import aiohttp
 import logging
 import os
+import time
 from fastapi import HTTPException
 from typing import Dict, Any, Optional, List
 from schemas.backlog import WorkItemResponse, BacklogResponse, WorkItemFilters
@@ -13,7 +13,7 @@ from utils.helpers import (
     get_first_and_last_day_of_month
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("azure_devops.service")
 
 class AzureDevOpsService:
     def __init__(self, organization: str, project_name: str, pat: str):
@@ -29,6 +29,7 @@ class AzureDevOpsService:
         skip: int = 0,
         continuation_token: Optional[str] = None
     ) -> ProjectsListResponse:
+        start = time.perf_counter()
         url = f"https://dev.azure.com/{self.organization}/_apis/projects"
         params: Dict[str, Any] = {
             "api-version": "7.0",
@@ -51,7 +52,7 @@ class AzureDevOpsService:
                 
                 data = await response.json()
                 next_token = response.headers.get("x-ms-continuationtoken")
-                
+
                 projects = [
                     ProjectResponse(
                         id=project.get("id", ""),
@@ -65,7 +66,17 @@ class AzureDevOpsService:
                     )
                     for project in data.get("value", [])
                 ]
-                
+
+                duration_ms = (time.perf_counter() - start) * 1000
+                logger.info(
+                    "Projects fetched | org=%s count=%s total=%s has_more=%s duration_ms=%.1f",
+                    self.organization,
+                    len(projects),
+                    data.get("count"),
+                    next_token is not None,
+                    duration_ms
+                )
+
                 return ProjectsListResponse(
                     count=len(projects),
                     total_count=data.get("count"),
@@ -80,9 +91,28 @@ class AzureDevOpsService:
         end_date: str,
         filters: Optional[WorkItemFilters] = None
     ) -> BacklogResponse:
+        start = time.perf_counter()
+        logger.info(
+            "Backlog fetch started | org=%s project=%s start=%s end=%s filters=%s",
+            self.organization,
+            self.project_name,
+            start_date,
+            end_date,
+            self._summarize_filters(filters)
+        )
+
         work_item_ids = await self._query_work_items(start_date, end_date, filters)
         
         if not work_item_ids:
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "Backlog empty | org=%s project=%s start=%s end=%s duration_ms=%.1f",
+                self.organization,
+                self.project_name,
+                start_date,
+                end_date,
+                duration_ms
+            )
             return BacklogResponse(
                 total_items=0,
                 parents=[],
@@ -97,7 +127,18 @@ class AzureDevOpsService:
         
         work_items = await self._get_work_items_details(work_item_ids)
         parents, children = self._categorize_work_items(work_items)
-        
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "Backlog fetched | org=%s project=%s items=%s parents=%s children=%s duration_ms=%.1f",
+            self.organization,
+            self.project_name,
+            len(work_items),
+            len(parents),
+            len(children),
+            duration_ms
+        )
+
         return BacklogResponse(
             total_items=len(work_items),
             parents=parents,
@@ -118,6 +159,7 @@ class AzureDevOpsService:
         end_date: str,
         filters: Optional[WorkItemFilters] = None
     ) -> List[int]:
+        start = time.perf_counter()
         url = f"https://dev.azure.com/{self.organization}/{self.project_name}/_apis/wit/wiql"
         params = {"api-version": "7.0"}
         
@@ -164,7 +206,17 @@ class AzureDevOpsService:
                     )
                 
                 data = await response.json()
-                return [item["id"] for item in data.get("workItems", [])]
+                ids = [item["id"] for item in data.get("workItems", [])]
+
+                duration_ms = (time.perf_counter() - start) * 1000
+                logger.info(
+                    "WIQL query executed | org=%s project=%s ids=%s duration_ms=%.1f",
+                    self.organization,
+                    self.project_name,
+                    len(ids),
+                    duration_ms
+                )
+                return ids
 
     async def _get_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
         if not work_item_ids:
@@ -172,6 +224,7 @@ class AzureDevOpsService:
         
         all_items = []
         batch_size = 200
+        start = time.perf_counter()
         
         for i in range(0, len(work_item_ids), batch_size):
             batch_ids = work_item_ids[i:i + batch_size]
@@ -196,7 +249,24 @@ class AzureDevOpsService:
                     
                     data = await response.json()
                     all_items.extend(data.get("value", []))
+
+                    logger.info(
+                        "Fetched work item batch | org=%s project=%s batch_size=%s accumulated=%s",
+                        self.organization,
+                        self.project_name,
+                        len(batch_ids),
+                        len(all_items)
+                    )
         
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "Work item details fetched | org=%s project=%s total=%s duration_ms=%.1f",
+            self.organization,
+            self.project_name,
+            len(all_items),
+            duration_ms
+        )
+
         return all_items
 
     def _categorize_work_items(self, work_items: List[Dict[str, Any]]) -> tuple[List[WorkItemResponse], List[WorkItemResponse]]:
@@ -249,3 +319,23 @@ class AzureDevOpsService:
                 children.append(work_item_response)
         
         return parents, children
+
+    def _summarize_filters(self, filters: Optional[WorkItemFilters]) -> str:
+        if not filters:
+            return "none"
+
+        parts = []
+        if filters.work_item_types:
+            parts.append(f"types={len(filters.work_item_types)}")
+        if filters.states:
+            parts.append(f"states={len(filters.states)}")
+        if filters.area_paths:
+            parts.append(f"areas={len(filters.area_paths)}")
+        if filters.iteration_paths:
+            parts.append(f"iterations={len(filters.iteration_paths)}")
+        if filters.assigned_to:
+            parts.append(f"assignees={len(filters.assigned_to)}")
+        if filters.tags:
+            parts.append("tags=1")
+
+        return "|".join(parts) if parts else "none"

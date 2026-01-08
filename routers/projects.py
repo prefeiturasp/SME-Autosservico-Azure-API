@@ -8,8 +8,7 @@ from schemas.project import ProjectsListResponse
 from config import settings
 from utils.helpers import get_env_or_param
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("api.projects")
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -53,17 +52,35 @@ async def list_projects(
             "Personal Access Token"
         )
 
+        logger.info(
+            "Projects request | org=%s top=%s skip=%s continuation_token=%s",
+            org,
+            top,
+            skip,
+            bool(continuation_token)
+        )
+
         service = AzureDevOpsService(
             organization=org,
             project_name="",
             pat=token
         )
 
-        return await service.get_projects(
+        response = await service.get_projects(
             top=top,
             skip=skip,
             continuation_token=continuation_token
         )
+
+        logger.info(
+            "Projects response | org=%s count=%s has_more=%s continuation_token=%s",
+            org,
+            response.count,
+            response.has_more,
+            bool(response.continuation_token)
+        )
+
+        return response
 
     except HTTPException:
         raise

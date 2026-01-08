@@ -13,9 +13,7 @@ from schemas.backlog import (
 from config import settings
 from utils.helpers import get_env_or_param, get_first_and_last_day_of_month
 
-# Configuração de logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("api.backlog")
 
 router = APIRouter()
 
@@ -85,7 +83,28 @@ async def get_backlog(request: WorkItemRequest):
             pat=pat
         )
 
-        return await service.get_backlog_data(start_date, end_date, request.filters)
+        filters_summary = _summarize_filters(request.filters)
+        logger.info(
+            "Backlog request | org=%s project=%s start=%s end=%s filters=%s",
+            organization,
+            request.project_name,
+            start_date,
+            end_date,
+            filters_summary
+        )
+
+        response = await service.get_backlog_data(start_date, end_date, request.filters)
+
+        logger.info(
+            "Backlog response | org=%s project=%s total_items=%s parents=%s children=%s",
+            organization,
+            request.project_name,
+            response.total_items,
+            len(response.parents),
+            len(response.children)
+        )
+
+        return response
 
     except HTTPException:
         raise
@@ -140,3 +159,25 @@ async def get_backlog_query_params(
     )
 
     return await get_backlog(request)
+
+
+def _summarize_filters(filters: Optional[WorkItemFilters]) -> str:
+    """Gera resumo seguro dos filtros sem expor dados sensíveis."""
+    if not filters:
+        return "none"
+
+    parts = []
+    if filters.work_item_types:
+        parts.append(f"types={len(filters.work_item_types)}")
+    if filters.states:
+        parts.append(f"states={len(filters.states)}")
+    if filters.area_paths:
+        parts.append(f"areas={len(filters.area_paths)}")
+    if filters.iteration_paths:
+        parts.append(f"iterations={len(filters.iteration_paths)}")
+    if filters.assigned_to:
+        parts.append(f"assignees={len(filters.assigned_to)}")
+    if filters.tags:
+        parts.append("tags=1")
+
+    return "|".join(parts) if parts else "none"
