@@ -153,6 +153,33 @@ class AzureDevOpsService:
             }
         )
 
+    def _build_filter_clauses(self, filters: WorkItemFilters) -> List[str]:
+        """Builds WIQL filter clauses from WorkItemFilters."""
+        clauses = []
+        
+        if filters.work_item_types:
+            types = ", ".join(f"'{t}'" for t in filters.work_item_types)
+            clauses.append(f"[System.WorkItemType] IN ({types})")
+        
+        if filters.states:
+            states = ", ".join(f"'{s}'" for s in filters.states)
+            clauses.append(f"[System.State] IN ({states})")
+        
+        if filters.area_paths:
+            clauses.extend(f"[System.AreaPath] UNDER '{area}'" for area in filters.area_paths)
+        
+        if filters.iteration_paths:
+            clauses.extend(f"[System.IterationPath] UNDER '{it}'" for it in filters.iteration_paths)
+        
+        if filters.assigned_to:
+            users = ", ".join(f"'{u}'" for u in filters.assigned_to)
+            clauses.append(f"[System.AssignedTo] IN ({users})")
+        
+        if filters.tags:
+            clauses.append(f"[System.Tags] CONTAINS '{filters.tags}'")
+        
+        return clauses
+
     async def _query_work_items(
         self,
         start_date: str,
@@ -170,23 +197,7 @@ class AzureDevOpsService:
         ]
         
         if filters:
-            if filters.work_item_types:
-                types = ", ".join(f"'{t}'" for t in filters.work_item_types)
-                where_clauses.append(f"[System.WorkItemType] IN ({types})")
-            if filters.states:
-                states = ", ".join(f"'{s}'" for s in filters.states)
-                where_clauses.append(f"[System.State] IN ({states})")
-            if filters.area_paths:
-                for area in filters.area_paths:
-                    where_clauses.append(f"[System.AreaPath] UNDER '{area}'")
-            if filters.iteration_paths:
-                for iteration in filters.iteration_paths:
-                    where_clauses.append(f"[System.IterationPath] UNDER '{iteration}'")
-            if filters.assigned_to:
-                users = ", ".join(f"'{u}'" for u in filters.assigned_to)
-                where_clauses.append(f"[System.AssignedTo] IN ({users})")
-            if filters.tags:
-                where_clauses.append(f"[System.Tags] CONTAINS '{filters.tags}'")
+            where_clauses.extend(self._build_filter_clauses(filters))
         
         wiql = f"SELECT [System.Id] FROM WorkItems WHERE {' AND '.join(where_clauses)} ORDER BY [System.CreatedDate] DESC"
         
@@ -269,54 +280,65 @@ class AzureDevOpsService:
 
         return all_items
 
-    def _categorize_work_items(self, work_items: List[Dict[str, Any]]) -> tuple[List[WorkItemResponse], List[WorkItemResponse]]:
+    def _extract_parent_info(self, relations: Optional[List[Dict]]) -> tuple[Optional[int], Optional[str]]:
+        """Extracts parent ID and link from work item relations."""
+        if not relations:
+            return None, None
+        
+        for rel in relations:
+            if rel.get("rel") == "System.LinkTypes.Hierarchy-Reverse":
+                parent_url = rel.get("url", "")
+                if parent_url:
+                    return int(parent_url.split("/")[-1]), parent_url
+                break
+        
+        return None, None
+
+    def _get_display_name(self, field_value: Any) -> Optional[str]:
+        """Safely extracts displayName from a field that may be a dict or None."""
+        if isinstance(field_value, dict):
+            return field_value.get("displayName")
+        return None
+
+    def _create_work_item_response(self, item: Dict[str, Any]) -> WorkItemResponse:
+        """Creates a WorkItemResponse from a raw work item dict."""
+        fields = item.get("fields", {})
+        parent_id, parent_link = self._extract_parent_info(item.get("relations"))
+        
+        return WorkItemResponse(
+            id=item.get("id"),
+            title=fields.get("System.Title", ""),
+            state=fields.get("System.State"),
+            work_item_type=fields.get("System.WorkItemType", ""),
+            tags=fields.get("System.Tags"),
+            created_by=self._get_display_name(fields.get("System.CreatedBy")),
+            assigned_to=self._get_display_name(fields.get("System.AssignedTo")),
+            area_path=fields.get("System.AreaPath"),
+            team_project=fields.get("System.TeamProject"),
+            iteration_path=fields.get("System.IterationPath"),
+            completed_work=fields.get("Microsoft.VSTS.Scheduling.CompletedWork"),
+            original_estimate=fields.get("Microsoft.VSTS.Scheduling.OriginalEstimate"),
+            start_date=format_date(fields.get("Microsoft.VSTS.Scheduling.StartDate")),
+            finish_date=format_date(fields.get("Microsoft.VSTS.Scheduling.FinishDate")),
+            created_date=format_date(fields.get("System.CreatedDate")),
+            changed_date=format_date(fields.get("System.ChangedDate")),
+            closed_date=format_date(fields.get("Microsoft.VSTS.Common.ClosedDate")),
+            parent_id=parent_id,
+            parent_link=parent_link
+        )
+
+    def _categorize_work_items(
+        self, work_items: List[Dict[str, Any]]
+    ) -> tuple[List[WorkItemResponse], List[WorkItemResponse]]:
+        """Categorizes work items into parents and children based on type."""
+        parent_types = {"Epic", "Feature", "User Story", "Product Backlog Item"}
         parents = []
         children = []
         
-        parent_types = {"Epic", "Feature", "User Story", "Product Backlog Item"}
-        
         for item in work_items:
-            fields = item.get("fields", {})
-            work_item_type = fields.get("System.WorkItemType", "")
-            
-            parent_id = None
-            parent_link = None
-            relations = item.get("relations", [])
-            if relations:
-                for rel in relations:
-                    if rel.get("rel") == "System.LinkTypes.Hierarchy-Reverse":
-                        parent_url = rel.get("url", "")
-                        if parent_url:
-                            parent_id = int(parent_url.split("/")[-1])
-                            parent_link = parent_url
-                        break
-            
-            work_item_response = WorkItemResponse(
-                id=item.get("id"),
-                title=fields.get("System.Title", ""),
-                state=fields.get("System.State"),
-                work_item_type=work_item_type,
-                tags=fields.get("System.Tags"),
-                created_by=fields.get("System.CreatedBy", {}).get("displayName") if isinstance(fields.get("System.CreatedBy"), dict) else None,
-                assigned_to=fields.get("System.AssignedTo", {}).get("displayName") if isinstance(fields.get("System.AssignedTo"), dict) else None,
-                area_path=fields.get("System.AreaPath"),
-                team_project=fields.get("System.TeamProject"),
-                iteration_path=fields.get("System.IterationPath"),
-                completed_work=fields.get("Microsoft.VSTS.Scheduling.CompletedWork"),
-                original_estimate=fields.get("Microsoft.VSTS.Scheduling.OriginalEstimate"),
-                start_date=format_date(fields.get("Microsoft.VSTS.Scheduling.StartDate")),
-                finish_date=format_date(fields.get("Microsoft.VSTS.Scheduling.FinishDate")),
-                created_date=format_date(fields.get("System.CreatedDate")),
-                changed_date=format_date(fields.get("System.ChangedDate")),
-                closed_date=format_date(fields.get("Microsoft.VSTS.Common.ClosedDate")),
-                parent_id=parent_id,
-                parent_link=parent_link
-            )
-            
-            if work_item_type in parent_types:
-                parents.append(work_item_response)
-            else:
-                children.append(work_item_response)
+            work_item_response = self._create_work_item_response(item)
+            target_list = parents if work_item_response.work_item_type in parent_types else children
+            target_list.append(work_item_response)
         
         return parents, children
 
