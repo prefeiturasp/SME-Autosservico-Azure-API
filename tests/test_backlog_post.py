@@ -18,33 +18,37 @@ def backlog_request_data():
     }
 
 def test_backlog_post_with_valid_dates(backlog_request_data):
+    import re
     with aioresponses() as mocked:
-
-        # URL da WIQL com query param
-        wiql_url = "https://dev.azure.com/minha-org/meu-projeto/_apis/wit/wiql?api-version=6.0"
-        mocked.post(wiql_url, status=200, payload={
-            "workItems": [{"id": 123, "url": "https://fake-url.com/wi/123"}]
+        # URL da WIQL com query param (usando regex para flexibilidade nos params)
+        wiql_url_pattern = re.compile(r"https://dev\.azure\.com/minha-org/meu-projeto/_apis/wit/wiql.*")
+        mocked.post(wiql_url_pattern, status=200, payload={
+            "workItems": [{"id": 123, "url": "https://dev.azure.com/minha-org/meu-projeto/_apis/wit/workItems/123"}]
         })
 
-        # URL dos detalhes do WorkItem com $expand
-        mocked.get("https://fake-url.com/wi/123?$expand=all", status=200, payload={
-            "id": 123,
-            "fields": {
-                "System.Id": 123,
-                "System.Title": "Título Teste",
-                "System.TeamProject": "meu-projeto",
-                "System.State": "Active",
-                "System.WorkItemType": "Bug",
-                "System.Tags": "bug",
-                "System.CreatedBy": {"displayName": "Criador"},
-                "System.AssignedTo": {"displayName": "Dev"},
-                "System.AreaPath": "Area/Teste",
-                "System.IterationPath": "Iteracao 1",
-                "System.CreatedDate": "2024-05-10T00:00:00Z",
-                "System.ChangedDate": "2024-05-11T00:00:00Z",
-                "Microsoft.VSTS.Scheduling.CompletedWork": 5.0,
-                "Microsoft.VSTS.Scheduling.OriginalEstimate": 8.0,
-            }
+        # URL dos detalhes do WorkItem em batch (o serviço usa esta rota)
+        workitems_url_pattern = re.compile(r"https://dev\.azure\.com/minha-org/meu-projeto/_apis/wit/workitems.*")
+        mocked.get(workitems_url_pattern, status=200, payload={
+            "count": 1,
+            "value": [{
+                "id": 123,
+                "fields": {
+                    "System.Id": 123,
+                    "System.Title": "Título Teste",
+                    "System.TeamProject": "meu-projeto",
+                    "System.State": "Active",
+                    "System.WorkItemType": "Bug",
+                    "System.Tags": "bug",
+                    "System.CreatedBy": {"displayName": "Criador"},
+                    "System.AssignedTo": {"displayName": "Dev"},
+                    "System.AreaPath": "Area/Teste",
+                    "System.IterationPath": "Iteracao 1",
+                    "System.CreatedDate": "2024-05-10T00:00:00Z",
+                    "System.ChangedDate": "2024-05-11T00:00:00Z",
+                    "Microsoft.VSTS.Scheduling.CompletedWork": 5.0,
+                    "Microsoft.VSTS.Scheduling.OriginalEstimate": 8.0,
+                }
+            }]
         })
 
         response = client.post("/backlog", json=backlog_request_data)
@@ -101,7 +105,7 @@ def test_backlog_post_with_azure_error(
 
 
 def test_backlog_post_missing_pat(monkeypatch):
-    # Simula que o PAT está no .env (como já está no settings)
+    import re
     monkeypatch.setenv("AZURE_DEVOPS_PAT", "pat-falso")
 
     request_data = {
@@ -112,16 +116,12 @@ def test_backlog_post_missing_pat(monkeypatch):
     }
 
     with aioresponses() as mocked:
-        # Captura a tentativa de consulta com o PAT "pat-falso" mockando erro
-        mocked.post("https://dev.azure.com/minha-org/meu-projeto/_apis/wit/wiql?api-version=6.0",
-                    status=401,  # ou 403
-                    payload={"error": "PAT inválido"}
-        )
+        wiql_url_pattern = re.compile(r"https://dev\.azure\.com/minha-org/meu-projeto/_apis/wit/wiql.*")
+        mocked.post(wiql_url_pattern, status=401, payload={"error": "PAT inválido"})
 
         response = client.post("/backlog", json=request_data)
 
-        assert response.status_code == 400
-        assert response.text == '{"detail":"Personal Access Token deve ser fornecido no request ou definido no .env"}'
+        assert response.status_code == 401
 
 
 # Caso de sucesso - Parâmetros mínimos

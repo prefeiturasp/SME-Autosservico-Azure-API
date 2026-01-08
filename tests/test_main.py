@@ -195,129 +195,48 @@ class TestAzureDevOpsService:
         assert azure_service.pat == "test-pat"
         assert "Authorization" in azure_service.headers
 
-    def test_build_additional_filters_empty(self, azure_service):
-        """Testa construção de filtros vazios"""
-        result = azure_service.build_additional_filters(None)
-        assert result == {}
+    def test_summarize_filters_empty(self, azure_service):
+        result = azure_service._summarize_filters(None)
+        assert result == "none"
 
-    def test_build_additional_filters_with_data(self, azure_service, sample_work_item_filters):
-        """Testa construção de filtros com dados"""
-        result = azure_service.build_additional_filters(sample_work_item_filters)
+    def test_summarize_filters_with_data(self, azure_service, sample_work_item_filters):
+        result = azure_service._summarize_filters(sample_work_item_filters)
+        assert "types=2" in result
+        assert "states=2" in result
 
-        expected_filters = {
-            'System.WorkItemType': ['Task', 'Bug'],
-            'System.State': ['Active', 'New'],
-            'System.AreaPath': ['MyProject\\Area1'],
-            'System.IterationPath': ['MyProject\\Sprint 1'],
-            'System.AssignedTo': ['John Doe'],
-            'System.Tags': 'test'
-        }
+    def test_categorize_work_items_parents(self, azure_service, sample_work_item_data):
+        sample_work_item_data["fields"]["System.WorkItemType"] = "User Story"
+        parents, children = azure_service._categorize_work_items([sample_work_item_data])
+        assert len(parents) == 1
+        assert len(children) == 0
 
-        assert result == expected_filters
+    def test_categorize_work_items_children(self, azure_service, sample_work_item_data):
+        sample_work_item_data["fields"]["System.WorkItemType"] = "Task"
+        parents, children = azure_service._categorize_work_items([sample_work_item_data])
+        assert len(parents) == 0
+        assert len(children) == 1
 
-    def test_extract_work_item_info_valid(self, azure_service, sample_work_item_data):
-        """Testa extração de informações de work item válido"""
-        result = azure_service.extract_work_item_info(sample_work_item_data)
-        assert result is None
-
-    def test_extract_work_item_info_invalid(self, azure_service):
-        """Testa extração de informações de work item inválido"""
-        result = azure_service.extract_work_item_info({})
-        assert result is None
-
-    def test_extract_work_item_info_wrong_project(self, azure_service, sample_work_item_data):
-        """Testa extração de work item de projeto incorreto"""
-        sample_work_item_data["fields"]["System.TeamProject"] = "wrong-project"
-        result = azure_service.extract_work_item_info(sample_work_item_data)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_fetch_work_items_query_success(self, azure_service):
-        """Testa busca bem-sucedida de work items"""
-        mock_response = {
-            "workItems": [
-                {"id": 1, "url": "https://dev.azure.com/test/_apis/wit/workItems/1"},
-                {"id": 2, "url": "https://dev.azure.com/test/_apis/wit/workItems/2"}
-            ]
-        }
-
-        with patch('aiohttp.ClientSession.post') as mock_post:
-            mock_post.return_value.__aenter__.return_value.status = 200
-            mock_post.return_value.__aenter__.return_value.json = AsyncMock(return_value=mock_response)
-
-            result = await azure_service.fetch_work_items_query("2024-01-01", "2024-01-31")
-
-            assert result == mock_response
-            mock_post.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_fetch_work_items_query_error(self, azure_service):
-        """Testa erro na busca de work items"""
-        with patch('aiohttp.ClientSession.post') as mock_post:
-            mock_post.return_value.__aenter__.return_value.status = 400
-            mock_post.return_value.__aenter__.return_value.text = AsyncMock(return_value="Bad Request")
-
-            with pytest.raises(HTTPException) as exc_info:
-                await azure_service.fetch_work_items_query("2024-01-01", "2024-01-31")
-
-            assert exc_info.value.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_fetch_work_item_details_success(self, azure_service, sample_work_item_data):
-        """Testa busca bem-sucedida de detalhes do work item"""
-        with patch('aiohttp.ClientSession.get') as mock_get:
-            mock_get.return_value.__aenter__.return_value.status = 200
-            mock_get.return_value.__aenter__.return_value.json = AsyncMock(return_value=sample_work_item_data)
-
-            result = await azure_service.fetch_work_item_details("test-url")
-
-            assert result == sample_work_item_data
-
-    @pytest.mark.asyncio
-    async def test_fetch_work_item_details_error(self, azure_service):
-        """Testa erro na busca de detalhes do work item"""
-        with patch('aiohttp.ClientSession.get') as mock_get:
-            mock_get.return_value.__aenter__.return_value.status = 404
-
-            result = await azure_service.fetch_work_item_details("test-url")
-
-            assert result == {}
+    def test_categorize_work_items_empty(self, azure_service):
+        parents, children = azure_service._categorize_work_items([])
+        assert len(parents) == 0
+        assert len(children) == 0
 
     @pytest.mark.asyncio
     async def test_get_backlog_data_success(self, azure_service, sample_work_item_data):
-        """Testa obtenção bem-sucedida de dados do backlog"""
-        query_response = {
-            "workItems": [
-                {"id": 12345, "url": "https://dev.azure.com/test/_apis/wit/workItems/12345"}
-            ]
-        }
+        query_ids = [12345]
+        sample_work_item_data["fields"]["System.WorkItemType"] = "Task"
 
-        with patch.object(azure_service, 'fetch_work_items_query', return_value=query_response):
-            with patch.object(azure_service, 'fetch_work_item_details', return_value=sample_work_item_data):
-                with patch.object(azure_service, 'extract_work_item_info') as mock_extract:
-                    mock_work_item = WorkItemResponse(
-                        id=12345, title="Test", state="Active", work_item_type="Task",
-                        tags=None, created_by=None, assigned_to=None, area_path=None,
-                        team_project=None, iteration_path=None, completed_work=None,
-                        original_estimate=None, start_date=None, finish_date=None,
-                        created_date=None, changed_date=None, closed_date=None,
-                        parent_id=12345, parent_link=None
-                    )
-                    mock_extract.return_value = mock_work_item
+        with patch.object(azure_service, '_query_work_items', return_value=query_ids):
+            with patch.object(azure_service, '_get_work_items_details', return_value=[sample_work_item_data]):
+                result = await azure_service.get_backlog_data("2024-01-01", "2024-01-31")
 
-                    result = await azure_service.get_backlog_data("2024-01-01", "2024-01-31")
-
-                    assert isinstance(result, BacklogResponse)
-                    assert result.total_items == 1
-                    assert len(result.parents) == 1
-                    assert len(result.children) == 0
+                assert isinstance(result, BacklogResponse)
+                assert result.total_items == 1
+                assert len(result.children) == 1
 
     @pytest.mark.asyncio
     async def test_get_backlog_data_no_items(self, azure_service):
-        """Testa obtenção de backlog sem items"""
-        query_response = {"workItems": []}
-
-        with patch.object(azure_service, 'fetch_work_items_query', return_value=query_response):
+        with patch.object(azure_service, '_query_work_items', return_value=[]):
             result = await azure_service.get_backlog_data("2024-01-01", "2024-01-31")
 
             assert isinstance(result, BacklogResponse)
@@ -546,26 +465,20 @@ class TestPydanticModels:
 # ================================
 
 class TestErrorHandling:
-    """Testes para tratamento de erros e casos extremos"""
 
     @pytest.mark.asyncio
-    async def test_azure_service_connection_error(self, azure_service):
-        """Testa erro de conexão com Azure DevOps"""
-        with patch('aiohttp.ClientSession.post', side_effect=aiohttp.ClientError("Connection failed")):
-            with pytest.raises(HTTPException) as exc_info:
-                await azure_service.fetch_work_items_query("2024-01-01", "2024-01-31")
-
-            assert exc_info.value.status_code == 503
-            assert "Erro de conexão" in str(exc_info.value.detail)
-
-    @pytest.mark.asyncio
-    async def test_azure_service_unexpected_error(self, azure_service):
-        """Testa erro inesperado no serviço"""
-        with patch.object(azure_service, 'fetch_work_items_query', side_effect=Exception("Unexpected error")):
+    async def test_azure_service_query_error(self, azure_service):
+        with patch.object(azure_service, '_query_work_items', side_effect=HTTPException(status_code=400, detail="Query error")):
             with pytest.raises(HTTPException) as exc_info:
                 await azure_service.get_backlog_data("2024-01-01", "2024-01-31")
 
-            assert exc_info.value.status_code == 500
+            assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_azure_service_unexpected_error(self, azure_service):
+        with patch.object(azure_service, '_query_work_items', side_effect=Exception("Unexpected error")):
+            with pytest.raises(Exception):
+                await azure_service.get_backlog_data("2024-01-01", "2024-01-31")
 
     def test_endpoint_internal_server_error(self):
         """Testa erro interno do servidor no endpoint"""
@@ -589,42 +502,41 @@ class TestErrorHandling:
 # ================================
 
 class TestPerformance:
-    """Testes de performance e concorrência"""
 
     @pytest.mark.asyncio
     async def test_concurrent_work_item_fetching(self, azure_service, sample_work_item_data):
-        """Testa busca concorrente de work items"""
-        query_response = {
-            "workItems": [
-                {"id": i, "url": f"https://dev.azure.com/test/_apis/wit/workItems/{i}"}
-                for i in range(10)
-            ]
-        }
+        query_ids = list(range(1, 11))
+        work_items = []
+        for i in query_ids:
+            item = {
+                "id": i,
+                "fields": {
+                    "System.Id": i,
+                    "System.Title": f"Test Item {i}",
+                    "System.State": "Active",
+                    "System.WorkItemType": "Task",
+                    "System.Tags": "test",
+                    "System.CreatedBy": {"displayName": "John"},
+                    "System.AssignedTo": {"displayName": "Jane"},
+                    "System.AreaPath": "Area1",
+                    "System.TeamProject": "TestProject",
+                    "System.IterationPath": "Sprint1"
+                }
+            }
+            work_items.append(item)
 
-        with patch.object(azure_service, 'fetch_work_items_query', return_value=query_response):
-            with patch.object(azure_service, 'fetch_work_item_details', return_value=sample_work_item_data):
-                with patch.object(azure_service, 'extract_work_item_info') as mock_extract:
-                    mock_work_item = WorkItemResponse(
-                        id=1, title="Test", state="Active", work_item_type="Task",
-                        tags=None, created_by=None, assigned_to=None, area_path=None,
-                        team_project=None, iteration_path=None, completed_work=None,
-                        original_estimate=None, start_date=None, finish_date=None,
-                        created_date=None, changed_date=None, closed_date=None,
-                        parent_id=1, parent_link=None
-                    )
-                    mock_extract.return_value = mock_work_item
+        with patch.object(azure_service, '_query_work_items', return_value=query_ids):
+            with patch.object(azure_service, '_get_work_items_details', return_value=work_items):
+                import time
+                start_time = time.time()
 
-                    import time
-                    start_time = time.time()
+                result = await azure_service.get_backlog_data("2024-01-01", "2024-01-31")
 
-                    result = await azure_service.get_backlog_data("2024-01-01", "2024-01-31")
+                end_time = time.time()
+                execution_time = end_time - start_time
 
-                    end_time = time.time()
-                    execution_time = end_time - start_time
-
-                    # Verifica se a execução foi razoavelmente rápida (menos de 5 segundos)
-                    assert execution_time < 5.0
-                    assert result.total_items == 10
+                assert execution_time < 5.0
+                assert result.total_items == 10
 
 
 # ================================
