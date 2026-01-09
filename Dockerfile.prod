@@ -1,0 +1,39 @@
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+# Instala dependências em camada isolada para copiar somente o necessário
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    API_HOST=0.0.0.0
+
+WORKDIR /app
+
+# Copia dependências pré-instaladas
+COPY --from=builder /install /usr/local
+
+# Copia código da aplicação
+COPY . .
+
+# Usuário não-root para execução
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+# Gunicorn com worker uvicorn para produção; WORKERS e API_PORT configuráveis via env
+CMD ["sh", "-c", "exec gunicorn -k uvicorn.workers.UvicornWorker -w ${WORKERS:-4} -b 0.0.0.0:${API_PORT:-8000} main:app"]
