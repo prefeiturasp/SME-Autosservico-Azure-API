@@ -83,7 +83,7 @@ async def get_backlog(request: WorkItemRequest):
             pat=pat
         )
 
-        filters_summary = _summarize_filters(request.filters)
+        filters_summary = request.filters.summarize() if request.filters else "none"
         logger.info(
             "Backlog request | org=%s project=%s start=%s end=%s filters=%s",
             organization,
@@ -159,25 +159,3 @@ async def get_backlog_query_params(
     )
 
     return await get_backlog(request)
-
-
-def _summarize_filters(filters: Optional[WorkItemFilters]) -> str:
-    """Gera resumo seguro dos filtros sem expor dados sensíveis."""
-    if not filters:
-        return "none"
-
-    parts = []
-    if filters.work_item_types:
-        parts.append(f"types={len(filters.work_item_types)}")
-    if filters.states:
-        parts.append(f"states={len(filters.states)}")
-    if filters.area_paths:
-        parts.append(f"areas={len(filters.area_paths)}")
-    if filters.iteration_paths:
-        parts.append(f"iterations={len(filters.iteration_paths)}")
-    if filters.assigned_to:
-        parts.append(f"assignees={len(filters.assigned_to)}")
-    if filters.tags:
-        parts.append("tags=1")
-
-    return "|".join(parts) if parts else "none"
