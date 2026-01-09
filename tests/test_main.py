@@ -196,11 +196,12 @@ class TestAzureDevOpsService:
         assert "Authorization" in azure_service.headers
 
     def test_summarize_filters_empty(self, azure_service):
-        result = azure_service._summarize_filters(None)
+        filters = WorkItemFilters()
+        result = filters.summarize()
         assert result == "none"
 
     def test_summarize_filters_with_data(self, azure_service, sample_work_item_filters):
-        result = azure_service._summarize_filters(sample_work_item_filters)
+        result = sample_work_item_filters.summarize()
         assert "types=2" in result
         assert "states=2" in result
 

@@ -98,7 +98,7 @@ class AzureDevOpsService:
             self.project_name,
             start_date,
             end_date,
-            self._summarize_filters(filters)
+            filters.summarize() if filters else "none"
         )
 
         work_item_ids = await self._query_work_items(start_date, end_date, filters)
@@ -341,23 +341,3 @@ class AzureDevOpsService:
             target_list.append(work_item_response)
         
         return parents, children
-
-    def _summarize_filters(self, filters: Optional[WorkItemFilters]) -> str:
-        if not filters:
-            return "none"
-
-        parts = []
-        if filters.work_item_types:
-            parts.append(f"types={len(filters.work_item_types)}")
-        if filters.states:
-            parts.append(f"states={len(filters.states)}")
-        if filters.area_paths:
-            parts.append(f"areas={len(filters.area_paths)}")
-        if filters.iteration_paths:
-            parts.append(f"iterations={len(filters.iteration_paths)}")
-        if filters.assigned_to:
-            parts.append(f"assignees={len(filters.assigned_to)}")
-        if filters.tags:
-            parts.append("tags=1")
-
-        return "|".join(parts) if parts else "none"

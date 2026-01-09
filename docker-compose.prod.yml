@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prod
-    image: azure-backlog-api:prod
+    image: sme-autosservico-apiazure:prod
     env_file:
       - .env
     environment:

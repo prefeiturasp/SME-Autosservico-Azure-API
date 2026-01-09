@@ -9,6 +9,23 @@ class WorkItemFilters(BaseModel):
     assigned_to: Optional[List[str]] = Field(None, description="Usuários atribuídos")
     tags: Optional[str] = Field(None, description="Tags específicas")
 
+    def summarize(self) -> str:
+        """Gera resumo seguro dos filtros sem expor dados sensíveis."""
+        parts = []
+        if self.work_item_types:
+            parts.append(f"types={len(self.work_item_types)}")
+        if self.states:
+            parts.append(f"states={len(self.states)}")
+        if self.area_paths:
+            parts.append(f"areas={len(self.area_paths)}")
+        if self.iteration_paths:
+            parts.append(f"iterations={len(self.iteration_paths)}")
+        if self.assigned_to:
+            parts.append(f"assignees={len(self.assigned_to)}")
+        if self.tags:
+            parts.append("tags=1")
+        return "|".join(parts) if parts else "none"
+
 class WorkItemRequest(BaseModel):
     organization: Optional[str] = Field(None,
                                         description="Nome da organização no Azure DevOps (usa padrão do .env se não informado)")
