@@ -15,3 +15,7 @@ venv
 .env
 .env.*
 htmlcov
+docker-compose.*
+README.md
+test_main.http
+tests/
