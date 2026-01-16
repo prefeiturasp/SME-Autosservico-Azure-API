@@ -15,7 +15,8 @@ venv
 .env
 .env.*
 htmlcov
-docker-compose.*
+docker-compose.prod.yml
+docker-compose.yml
 README.md
 test_main.http
 tests/
