@@ -26,7 +26,7 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # Copia código da aplicação
-COPY routers schemas services utils /app/
+COPY routers schemas services utils main.py config.py /app/
 
 # Usuário não-root para execução
 RUN useradd --create-home --shell /bin/bash appuser \
