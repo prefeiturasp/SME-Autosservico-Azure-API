@@ -27,6 +27,54 @@ async def health_check():
     }
 
 
+@router.get("/backlog/diagnostics", tags=["Backlog"])
+async def get_backlog_diagnostics(
+        project_name: str = Query(..., description="Nome do projeto"),
+        organization: Optional[str] = Query(None, description="Nome da organização")
+):
+    """
+    Endpoint de diagnóstico para verificar work item types disponíveis.
+    Retorna contagem por tipo de work item (sem filtro de tipo).
+    """
+    try:
+        org = organization or settings.default_organization
+        pat = settings.azure_devops_pat
+
+        service = AzureDevOpsService(
+            organization=org,
+            project_name=project_name,
+            pat=pat
+        )
+
+        # Busca SEM filtro de work item type para ver todos os tipos
+        response = await service.get_backlog_data(
+            start_date=None,
+            end_date=None,
+            filters=None  # Sem filtros
+        )
+
+        # Conta por tipo de work item
+        type_counts: dict = {}
+        all_items = response.parents + response.children
+        for item in all_items:
+            wit = item.work_item_type or "Unknown"
+            type_counts[wit] = type_counts.get(wit, 0) + 1
+
+        return {
+            "project_name": project_name,
+            "total_items": response.total_items,
+            "work_item_type_counts": type_counts,
+            "sample_items": [
+                {"id": item.id, "title": item.title[:80], "type": item.work_item_type, "state": item.state}
+                for item in all_items[:20]
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"Erro no diagnóstico: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/backlog", response_model=BacklogResponse, tags=["Backlog"])
 async def get_backlog(request: WorkItemRequest):
     """
@@ -52,29 +100,27 @@ async def get_backlog(request: WorkItemRequest):
             "Personal Access Token"
         )
 
-        # Determina as datas
+        # Determina as datas (agora opcional)
         if request.start_date and request.end_date:
             start_date = request.start_date
             end_date = request.end_date
         elif request.year and request.month:
             start_date, end_date = get_first_and_last_day_of_month(request.year, request.month)
         else:
-            # Usa mês atual como padrão
-            current_date = datetime.now()
-            start_date, end_date = get_first_and_last_day_of_month(
-                current_date.year,
-                current_date.month
-            )
+            # Sem filtro de data - busca todos
+            start_date = None
+            end_date = None
 
-        # Validação de datas
-        try:
-            datetime.strptime(start_date, '%Y-%m-%d')
-            datetime.strptime(end_date, '%Y-%m-%d')
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail="Formato de data inválido. Use YYYY-MM-DD"
-            )
+        # Validação de datas (apenas se especificadas)
+        if start_date and end_date:
+            try:
+                datetime.strptime(start_date, '%Y-%m-%d')
+                datetime.strptime(end_date, '%Y-%m-%d')
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Formato de data inválido. Use YYYY-MM-DD"
+                )
 
         # Cria o serviço e busca os dados
         service = AzureDevOpsService(
@@ -88,8 +134,8 @@ async def get_backlog(request: WorkItemRequest):
             "Backlog request | org=%s project=%s start=%s end=%s filters=%s",
             organization,
             request.project_name,
-            start_date,
-            end_date,
+            start_date or "none",
+            end_date or "none",
             filters_summary
         )
 
