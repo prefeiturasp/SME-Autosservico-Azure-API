@@ -150,17 +150,17 @@ async def test_get_backlog_parameter_conversion(test_client, mock_azure_service)
     assert response.status_code == status.HTTP_200_OK
 
 
-# Teste de datas padrão (mês atual)
+# Teste de datas opcionais (sem filtro de data quando não especificado)
 def test_get_backlog_default_dates(test_client, mock_azure_service):
-    """Testa se as datas padrão (mês atual) são usadas quando nenhuma data é fornecida"""
+    """Testa se nenhum filtro de data é aplicado quando nenhuma data é fornecida"""
     # Configura o retorno do mock
     mock_azure_service.get_backlog_data.return_value = BacklogResponse(
         total_items=0,
         parents=[],
         children=[],
         metadata={
-            "start_date": "2023-12-01",
-            "end_date": "2023-12-31",
+            "start_date": "none",
+            "end_date": "none",
             "organization": "test_org",
             "project": "test_project",
             "parents_count": 0,
@@ -169,21 +169,19 @@ def test_get_backlog_default_dates(test_client, mock_azure_service):
         }
     )
 
-    # Simula o datetime atual
-    with patch('routers.backlog.datetime') as mock_datetime:
-        mock_datetime.now.return_value = datetime(2023, 12, 15)
-        response = test_client.get(
-            "/backlog",
-            params={
-                "project_name": "test_project",
-                "organization": "minha-org",
-                "pat": "dummy_pat",  # Simula o PAT
-            }
-        )
+    response = test_client.get(
+        "/backlog",
+        params={
+            "project_name": "test_project",
+            "organization": "minha-org",
+            "pat": "dummy_pat",  # Simula o PAT
+        }
+    )
 
     assert response.status_code == status.HTTP_200_OK
 
     # Verifica os argumentos usados na chamada do serviço
+    # Quando nenhuma data é fornecida, start_date e end_date devem ser None
     called_args = mock_azure_service.get_backlog_data.call_args[0]
-    assert called_args[0] == "2023-12-01"
-    assert called_args[1] == "2023-12-31"
+    assert called_args[0] is None  # start_date
+    assert called_args[1] is None  # end_date
