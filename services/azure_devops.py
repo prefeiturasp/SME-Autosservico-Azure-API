@@ -87,8 +87,8 @@ class AzureDevOpsService:
 
     async def get_backlog_data(
         self,
-        start_date: str,
-        end_date: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         filters: Optional[WorkItemFilters] = None
     ) -> BacklogResponse:
         start = time.perf_counter()
@@ -96,8 +96,8 @@ class AzureDevOpsService:
             "Backlog fetch started | org=%s project=%s start=%s end=%s filters=%s",
             self.organization,
             self.project_name,
-            start_date,
-            end_date,
+            start_date or "none",
+            end_date or "none",
             filters.summarize() if filters else "none"
         )
 
@@ -118,8 +118,8 @@ class AzureDevOpsService:
                 parents=[],
                 children=[],
                 metadata={
-                    "start_date": start_date,
-                    "end_date": end_date,
+                    "start_date": start_date or "none",
+                    "end_date": end_date or "none",
                     "organization": self.organization,
                     "project": self.project_name
                 }
@@ -144,8 +144,8 @@ class AzureDevOpsService:
             parents=parents,
             children=children,
             metadata={
-                "start_date": start_date,
-                "end_date": end_date,
+                "start_date": start_date or "none",
+                "end_date": end_date or "none",
                 "organization": self.organization,
                 "project": self.project_name,
                 "total_parents": len(parents),
@@ -182,25 +182,35 @@ class AzureDevOpsService:
 
     async def _query_work_items(
         self,
-        start_date: str,
-        end_date: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         filters: Optional[WorkItemFilters] = None
     ) -> List[int]:
         start = time.perf_counter()
         url = f"https://dev.azure.com/{self.organization}/{self.project_name}/_apis/wit/wiql"
-        params = {"api-version": "7.0"}
-        
+        params = {
+            "api-version": "7.0",
+            "$top": 20000  # Garantir que todos os resultados sejam retornados
+        }
+
         where_clauses = [
-            f"[System.TeamProject] = '{self.project_name}'",
-            f"[System.CreatedDate] >= '{start_date}'",
-            f"[System.CreatedDate] <= '{end_date}'"
+            f"[System.TeamProject] = '{self.project_name}'"
         ]
-        
+
+        # Only add date filters if specified
+        if start_date:
+            where_clauses.append(f"[System.CreatedDate] >= '{start_date}'")
+        if end_date:
+            where_clauses.append(f"[System.CreatedDate] <= '{end_date}'")
+
         if filters:
             where_clauses.extend(self._build_filter_clauses(filters))
-        
+
         wiql = f"SELECT [System.Id] FROM WorkItems WHERE {' AND '.join(where_clauses)} ORDER BY [System.CreatedDate] DESC"
-        
+
+        # Log da query WIQL para debug
+        logger.info("WIQL Query: %s", wiql)
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url,
