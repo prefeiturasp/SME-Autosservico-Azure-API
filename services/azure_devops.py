@@ -366,17 +366,18 @@ class AzureDevOpsService:
     def _compute_bug_metrics(self, work_items: List[Dict[str, Any]]) -> BugMetrics:
         """Computa as métricas da seção de bugs a partir dos work items brutos.
 
-        Estados padrão do Azure DevOps para Bug:
-            - Abertos: New
-            - Em andamento: Active
-            - Resolvidos: Resolved, Closed
+        Considera todos os itens retornados pela query (o filtro de tipos do
+        request já define o escopo de bugs). Agrupamento de estados:
+            - Abertos: New, Approved
+            - Em andamento: Active, Testing, Blocked
+            - Resolvidos: Resolved, Done
         Tempo médio de atendimento: média entre a criação e a
-        resolução/fechamento dos bugs já resolvidos, na unidade mais
+        resolução/fechamento dos itens resolvidos, na unidade mais
         natural (minutos, horas, dias, meses ou anos).
         """
-        open_states = {"New"}
-        in_progress_states = {"Active"}
-        resolved_states = {"Resolved", "Closed"}
+        open_states = {"New", "Approved"}
+        in_progress_states = {"Active", "Testing", "Blocked"}
+        resolved_states = {"Resolved", "Done"}
 
         open_count = 0
         in_progress_count = 0
@@ -385,8 +386,6 @@ class AzureDevOpsService:
 
         for item in work_items:
             fields = item.get("fields", {})
-            if fields.get("System.WorkItemType") != "Bug":
-                continue
 
             state = fields.get("System.State")
             if state in open_states:
