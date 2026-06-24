@@ -4,10 +4,18 @@ import os
 import time
 from fastapi import HTTPException
 from typing import Dict, Any, Optional, List
-from schemas.backlog import WorkItemResponse, BacklogResponse, WorkItemFilters
+from schemas.backlog import (
+    WorkItemResponse,
+    BacklogResponse,
+    WorkItemFilters,
+    BugMetrics
+)
 from schemas.project import ProjectResponse, ProjectsListResponse
 from utils.helpers import (
     format_date,
+    parse_iso_datetime,
+    humanize_duration_hours,
+    format_duration_label,
     generate_work_item_url,
     create_auth_headers,
     get_first_and_last_day_of_month
@@ -117,6 +125,7 @@ class AzureDevOpsService:
                 total_items=0,
                 parents=[],
                 children=[],
+                bug_metrics=BugMetrics(),
                 metadata={
                     "start_date": start_date or "none",
                     "end_date": end_date or "none",
@@ -124,9 +133,10 @@ class AzureDevOpsService:
                     "project": self.project_name
                 }
             )
-        
+
         work_items = await self._get_work_items_details(work_item_ids)
         parents, children = self._categorize_work_items(work_items)
+        bug_metrics = self._compute_bug_metrics(work_items)
 
         duration_ms = (time.perf_counter() - start) * 1000
         logger.info(
@@ -143,6 +153,7 @@ class AzureDevOpsService:
             total_items=len(work_items),
             parents=parents,
             children=children,
+            bug_metrics=bug_metrics,
             metadata={
                 "start_date": start_date or "none",
                 "end_date": end_date or "none",
@@ -349,5 +360,62 @@ class AzureDevOpsService:
             work_item_response = self._create_work_item_response(item)
             target_list = parents if work_item_response.work_item_type in parent_types else children
             target_list.append(work_item_response)
-        
+
         return parents, children
+
+    def _compute_bug_metrics(self, work_items: List[Dict[str, Any]]) -> BugMetrics:
+        """Computa as métricas da seção de bugs a partir dos work items brutos.
+
+        Estados padrão do Azure DevOps para Bug:
+            - Abertos: New
+            - Em andamento: Active
+            - Resolvidos: Resolved, Closed
+        Tempo médio de atendimento: média entre a criação e a
+        resolução/fechamento dos bugs já resolvidos, na unidade mais
+        natural (minutos, horas, dias, meses ou anos).
+        """
+        open_states = {"New"}
+        in_progress_states = {"Active"}
+        resolved_states = {"Resolved", "Closed"}
+
+        open_count = 0
+        in_progress_count = 0
+        resolved_count = 0
+        resolution_hours: List[float] = []
+
+        for item in work_items:
+            fields = item.get("fields", {})
+            if fields.get("System.WorkItemType") != "Bug":
+                continue
+
+            state = fields.get("System.State")
+            if state in open_states:
+                open_count += 1
+            elif state in in_progress_states:
+                in_progress_count += 1
+            elif state in resolved_states:
+                resolved_count += 1
+
+            created = parse_iso_datetime(fields.get("System.CreatedDate"))
+            resolved_at = parse_iso_datetime(
+                fields.get("Microsoft.VSTS.Common.ResolvedDate")
+                or fields.get("Microsoft.VSTS.Common.ClosedDate")
+            )
+            if created and resolved_at and resolved_at >= created:
+                resolution_hours.append((resolved_at - created).total_seconds() / 3600)
+
+        total_cycle = open_count + in_progress_count + resolved_count
+
+        average_resolution = None
+        if resolution_hours:
+            avg_hours = sum(resolution_hours) / len(resolution_hours)
+            value, unit = humanize_duration_hours(avg_hours)
+            average_resolution = format_duration_label(value, unit)
+
+        return BugMetrics(
+            total_cycle=total_cycle,
+            open=open_count,
+            in_progress=in_progress_count,
+            resolved=resolved_count,
+            average_resolution=average_resolution
+        )
