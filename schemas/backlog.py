@@ -40,23 +40,23 @@ class WorkItemRequest(BaseModel):
 class WorkItemResponse(BaseModel):
     id: int
     title: str
-    state: Optional[str]
-    work_item_type: Optional[str]
-    tags: Optional[str]
-    created_by: Optional[str]
-    assigned_to: Optional[str]
-    area_path: Optional[str]
-    team_project: Optional[str]
-    iteration_path: Optional[str]
-    completed_work: Optional[float]
-    original_estimate: Optional[float]
-    start_date: Optional[str]
-    finish_date: Optional[str]
-    created_date: Optional[str]
-    changed_date: Optional[str]
-    closed_date: Optional[str]
-    parent_id: Optional[int]
-    parent_link: Optional[str]
+    state: Optional[str] = None
+    work_item_type: Optional[str] = None
+    tags: Optional[str] = None
+    created_by: Optional[str] = None
+    assigned_to: Optional[str] = None
+    area_path: Optional[str] = None
+    team_project: Optional[str] = None
+    iteration_path: Optional[str] = None
+    completed_work: Optional[float] = None
+    original_estimate: Optional[float] = None
+    start_date: Optional[str] = None
+    finish_date: Optional[str] = None
+    created_date: Optional[str] = None
+    changed_date: Optional[str] = None
+    closed_date: Optional[str] = None
+    parent_id: Optional[int] = None
+    parent_link: Optional[str] = None
 
 class BugMetrics(BaseModel):
     total_cycle: int = Field(0, description="Bugs do ciclo (total de bugs)")
