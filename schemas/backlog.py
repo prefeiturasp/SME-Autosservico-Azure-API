@@ -58,10 +58,21 @@ class WorkItemResponse(BaseModel):
     parent_id: Optional[int]
     parent_link: Optional[str]
 
+class BugMetrics(BaseModel):
+    total_cycle: int = Field(0, description="Bugs do ciclo (total de bugs)")
+    open: int = Field(0, description="Bugs abertos")
+    in_progress: int = Field(0, description="Bugs em andamento")
+    resolved: int = Field(0, description="Bugs resolvidos")
+    average_resolution: Optional[str] = Field(
+        None,
+        description="Tempo médio de atendimento em pt-br, pronto para exibição (ex.: '2d', '5h'; None quando não há bugs resolvidos)"
+    )
+
 class BacklogResponse(BaseModel):
     total_items: int
     parents: List[WorkItemResponse]
     children: List[WorkItemResponse]
+    bug_metrics: BugMetrics = Field(default_factory=BugMetrics)
     metadata: Dict[str, Any]
 
 class ErrorResponse(BaseModel):
