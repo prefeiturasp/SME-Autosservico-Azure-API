@@ -5,8 +5,8 @@ from services.azure_devops import AzureDevOpsService
 from utils.helpers import humanize_duration_hours, format_duration_label
 
 
-def _bug(state, created=None, resolved=None):
-    fields = {"System.WorkItemType": "Bug", "System.State": state}
+def _bug(state, created=None, resolved=None, work_item_type="BugFix"):
+    fields = {"System.WorkItemType": work_item_type, "System.State": state}
     if created:
         fields["System.CreatedDate"] = created
     if resolved:
@@ -19,52 +19,53 @@ def _service():
 
 
 def test_bug_metrics_counts_by_state():
-    """Métricas da seção de bugs: ciclo, abertos, em andamento e resolvidos."""
+    """Agrupamento dos estados em abertos, em andamento e resolvidos."""
     items = (
-        [_bug("New", "2024-05-01T00:00:00Z") for _ in range(5)]
-        + [_bug("Active", "2024-05-01T00:00:00Z") for _ in range(3)]
+        [_bug("New", "2024-05-01T00:00:00Z") for _ in range(3)]
+        + [_bug("Approved", "2024-05-01T00:00:00Z") for _ in range(2)]
+        + [_bug("Active", "2024-05-01T00:00:00Z") for _ in range(1)]
+        + [_bug("Testing", "2024-05-01T00:00:00Z") for _ in range(1)]
+        + [_bug("Blocked", "2024-05-01T00:00:00Z") for _ in range(1)]
         + [
             _bug("Resolved", "2024-05-01T00:00:00Z", "2024-05-03T00:00:00Z")
-            for _ in range(7)
+            for _ in range(4)
+        ]
+        + [
+            _bug("Done", "2024-05-01T00:00:00Z", "2024-05-03T00:00:00Z")
+            for _ in range(3)
         ]
     )
 
     metrics = _service()._compute_bug_metrics(items)
 
     assert metrics.total_cycle == 15
-    assert metrics.open == 5
-    assert metrics.in_progress == 3
-    assert metrics.resolved == 7
+    assert metrics.open == 5          # New + Approved
+    assert metrics.in_progress == 3   # Active + Testing + Blocked
+    assert metrics.resolved == 7      # Resolved + Done
     assert metrics.average_resolution == "2d"
 
 
-def test_bug_metrics_ignores_non_bugs():
-    """Work items que não são Bug não entram nas métricas."""
+def test_bug_metrics_counts_all_types():
+    """Todos os tipos retornados entram nas métricas (BugFix, HotFix, etc.)."""
     items = [
-        _bug("New", "2024-05-01T00:00:00Z"),
-        {"fields": {"System.WorkItemType": "Task", "System.State": "New"}},
-        {"fields": {"System.WorkItemType": "User Story", "System.State": "Active"}},
+        _bug("New", work_item_type="BugFix"),
+        _bug("Active", work_item_type="HotFix"),
+        _bug("Resolved", "2024-05-01T00:00:00Z", "2024-05-02T00:00:00Z",
+             work_item_type="Bug"),
     ]
 
     metrics = _service()._compute_bug_metrics(items)
 
-    assert metrics.total_cycle == 1
+    assert metrics.total_cycle == 3
     assert metrics.open == 1
-    assert metrics.in_progress == 0
-    assert metrics.resolved == 0
+    assert metrics.in_progress == 1
+    assert metrics.resolved == 1
 
 
-def test_bug_metrics_closed_counts_as_resolved():
-    """Bugs em 'Closed' contam como resolvidos e usam ClosedDate no tempo médio."""
+def test_bug_metrics_done_counts_as_resolved():
+    """Itens em 'Done' contam como resolvidos."""
     items = [
-        {
-            "fields": {
-                "System.WorkItemType": "Bug",
-                "System.State": "Closed",
-                "System.CreatedDate": "2024-05-01T00:00:00Z",
-                "Microsoft.VSTS.Common.ClosedDate": "2024-05-05T00:00:00Z",
-            }
-        }
+        _bug("Done", "2024-05-01T00:00:00Z", "2024-05-05T00:00:00Z"),
     ]
 
     metrics = _service()._compute_bug_metrics(items)
