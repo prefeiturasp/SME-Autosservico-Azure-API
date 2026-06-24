@@ -1,6 +1,6 @@
 import logging
 
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Query, HTTPException
 from datetime import datetime
@@ -8,7 +8,8 @@ from services.azure_devops import AzureDevOpsService
 from schemas.backlog import (
     WorkItemRequest,
     BacklogResponse,
-    WorkItemFilters
+    WorkItemFilters,
+    ErrorResponse
 )
 from config import settings
 from utils.helpers import get_env_or_param, get_first_and_last_day_of_month
@@ -27,10 +28,14 @@ async def health_check():
     }
 
 
-@router.get("/backlog/diagnostics", tags=["Backlog"])
+@router.get(
+    "/backlog/diagnostics",
+    tags=["Backlog"],
+    responses={500: {"model": ErrorResponse, "description": "Erro interno do servidor"}}
+)
 async def get_backlog_diagnostics(
-        project_name: str = Query(..., description="Nome do projeto"),
-        organization: Optional[str] = Query(None, description="Nome da organização")
+        project_name: Annotated[str, Query(description="Nome do projeto")],
+        organization: Annotated[Optional[str], Query(description="Nome da organização")] = None
 ):
     """
     Endpoint de diagnóstico para verificar work item types disponíveis.
@@ -75,7 +80,15 @@ async def get_backlog_diagnostics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/backlog", response_model=BacklogResponse, tags=["Backlog"])
+@router.post(
+    "/backlog",
+    response_model=BacklogResponse,
+    tags=["Backlog"],
+    responses={
+        400: {"model": ErrorResponse, "description": "Formato de data inválido"},
+        500: {"model": ErrorResponse, "description": "Erro interno do servidor"}
+    }
+)
 async def get_backlog(request: WorkItemRequest):
     """
     Extrai dados do backlog do Azure DevOps
@@ -159,23 +172,33 @@ async def get_backlog(request: WorkItemRequest):
         raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {str(e)}")
 
 
-@router.get("/backlog", response_model=BacklogResponse, tags=["Backlog"])
+@router.get(
+    "/backlog",
+    response_model=BacklogResponse,
+    tags=["Backlog"],
+    responses={
+        400: {"model": ErrorResponse, "description": "Formato de data inválido"},
+        500: {"model": ErrorResponse, "description": "Erro interno do servidor"}
+    }
+)
 async def get_backlog_query_params(
-        project_name: str = Query(..., description="Nome do projeto"),
-        organization: Optional[str] = Query(None,
-                                            description="Nome da organização no Azure DevOps (usa padrão do .env se não informado)"),
-        pat: Optional[str] = Query(None, description="Personal Access Token (usa padrão do .env se não informado)"),
-        start_date: Optional[str] = Query(None, description="Data inicial (YYYY-MM-DD)"),
-        end_date: Optional[str] = Query(None, description="Data final (YYYY-MM-DD)"),
-        year: Optional[int] = Query(None, description="Ano para busca por mês"),
-        month: Optional[int] = Query(None, description="Mês (1-12) para busca por mês"),
-        work_item_types: Optional[str] = Query(None,
-                                               description="Tipos de work items separados por vírgula (Bug,Task,User Story)"),
-        states: Optional[str] = Query(None, description="Estados separados por vírgula (New,Active,Resolved)"),
-        area_paths: Optional[str] = Query(None, description="Caminhos de área separados por vírgula"),
-        iteration_paths: Optional[str] = Query(None, description="Caminhos de iteração separados por vírgula"),
-        assigned_to: Optional[str] = Query(None, description="Usuários atribuídos separados por vírgula"),
-        tags: Optional[str] = Query(None, description="Tags específicas")
+        project_name: Annotated[str, Query(description="Nome do projeto")],
+        organization: Annotated[Optional[str], Query(
+            description="Nome da organização no Azure DevOps (usa padrão do .env se não informado)")] = None,
+        pat: Annotated[Optional[str], Query(
+            description="Personal Access Token (usa padrão do .env se não informado)")] = None,
+        start_date: Annotated[Optional[str], Query(description="Data inicial (YYYY-MM-DD)")] = None,
+        end_date: Annotated[Optional[str], Query(description="Data final (YYYY-MM-DD)")] = None,
+        year: Annotated[Optional[int], Query(description="Ano para busca por mês")] = None,
+        month: Annotated[Optional[int], Query(description="Mês (1-12) para busca por mês")] = None,
+        work_item_types: Annotated[Optional[str], Query(
+            description="Tipos de work items separados por vírgula (Bug,Task,User Story)")] = None,
+        states: Annotated[Optional[str], Query(
+            description="Estados separados por vírgula (New,Active,Resolved)")] = None,
+        area_paths: Annotated[Optional[str], Query(description="Caminhos de área separados por vírgula")] = None,
+        iteration_paths: Annotated[Optional[str], Query(description="Caminhos de iteração separados por vírgula")] = None,
+        assigned_to: Annotated[Optional[str], Query(description="Usuários atribuídos separados por vírgula")] = None,
+        tags: Annotated[Optional[str], Query(description="Tags específicas")] = None
 ):
     """
     Endpoint GET alternativo para extração do backlog usando query parameters
