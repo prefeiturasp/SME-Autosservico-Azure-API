@@ -1,10 +1,11 @@
 import logging
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Query, HTTPException
 
 from services.azure_devops import AzureDevOpsService
 from schemas.project import ProjectsListResponse
+from schemas.backlog import ErrorResponse
 from config import settings
 from utils.helpers import get_env_or_param
 
@@ -13,31 +14,30 @@ logger = logging.getLogger("api.projects")
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
 
-@router.get("", response_model=ProjectsListResponse)
+@router.get(
+    "",
+    response_model=ProjectsListResponse,
+    responses={500: {"model": ErrorResponse, "description": "Erro interno do servidor"}}
+)
 async def list_projects(
-    organization: Optional[str] = Query(
-        None,
+    organization: Annotated[Optional[str], Query(
         description="Nome da organizacao no Azure DevOps (usa padrao do .env se nao informado)"
-    ),
-    pat: Optional[str] = Query(
-        None,
+    )] = None,
+    pat: Annotated[Optional[str], Query(
         description="Personal Access Token (usa padrao do .env se nao informado)"
-    ),
-    top: int = Query(
-        100,
+    )] = None,
+    top: Annotated[int, Query(
         ge=1,
         le=500,
         description="Numero maximo de projetos por pagina (1-500)"
-    ),
-    skip: int = Query(
-        0,
+    )] = 100,
+    skip: Annotated[int, Query(
         ge=0,
         description="Numero de projetos a pular para paginacao"
-    ),
-    continuation_token: Optional[str] = Query(
-        None,
+    )] = 0,
+    continuation_token: Annotated[Optional[str], Query(
         description="Token de continuacao para buscar proxima pagina"
-    )
+    )] = None
 ):
     try:
         org = get_env_or_param(

@@ -1,9 +1,27 @@
-from utils.helpers import get_first_and_last_day_of_month, format_date, generate_work_item_url
+from datetime import datetime
+
+from utils.helpers import (
+    get_first_and_last_day_of_month,
+    format_date,
+    generate_work_item_url,
+    parse_iso_datetime,
+)
 
 def test_get_first_and_last_day_of_month():
     first, last = get_first_and_last_day_of_month(2024, 2)
     assert first == "2024-02-01"
     assert last == "2024-02-29"
+
+def test_parse_iso_datetime_valid():
+    result = parse_iso_datetime("2024-05-10T08:00:00Z")
+    assert isinstance(result, datetime)
+    assert (result.year, result.month, result.day) == (2024, 5, 10)
+
+def test_parse_iso_datetime_none():
+    assert parse_iso_datetime(None) is None
+
+def test_parse_iso_datetime_invalid():
+    assert parse_iso_datetime("data-invalida") is None
 
 def test_format_date_valid():
     assert format_date("2024-06-01T12:00:00Z") == "01/06/2024"
